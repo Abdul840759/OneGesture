@@ -30,6 +30,7 @@ class GestureBarService : AccessibilityService() {
 
         const val DEBUG_FILE = "gb_debug"
         const val DEBUG_KEY = "fit"
+        const val VIS_KEY = "vis"
 
         // Video apps: hidden in landscape (fullscreen playback) as a fallback signal.
         private val VIDEO_APPS = setOf(
@@ -122,6 +123,14 @@ class GestureBarService : AccessibilityService() {
         // Foreground apps (videos, games) hide the nav bar via system UI flags; we hear about it here.
         v.setOnSystemUiVisibilityChangeListener { vis ->
             navHidden = (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) != 0
+            val light = (vis and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) != 0
+            v.systemLightNav = light
+            getSharedPreferences(DEBUG_FILE, Context.MODE_PRIVATE).edit()
+                .putString(
+                    VIS_KEY,
+                    "System nav bar reported: " + (if (light) "light (dark pill)" else "dark (white pill)") +
+                        ", hidden=$navHidden"
+                ).apply()
             updateHide()
         }
 

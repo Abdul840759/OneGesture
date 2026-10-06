@@ -139,8 +139,9 @@ class MainActivity : Activity() {
         status.text = if (on) "Accessibility service: ON" else
             "Accessibility service: OFF. Enable \"One Gesture\" in accessibility settings."
         status.setTextColor(if (on) 0xFF15803D.toInt() else 0xFFB91C1C.toInt())
-        fitInfo.text = getSharedPreferences(GestureBarService.DEBUG_FILE, MODE_PRIVATE)
-            .getString(GestureBarService.DEBUG_KEY, "Overlay fit: not measured yet (service off?)")
+        val dbg = getSharedPreferences(GestureBarService.DEBUG_FILE, MODE_PRIVATE)
+        fitInfo.text = dbg.getString(GestureBarService.DEBUG_KEY, "Overlay fit: not measured yet (service off?)") +
+            "\n" + dbg.getString(GestureBarService.VIS_KEY, "System nav bar: no change reported yet")
     }
 
     private fun serviceEnabled(): Boolean {
@@ -189,7 +190,7 @@ class MainActivity : Activity() {
     private fun themeGroup(parent: LinearLayout) {
         val current = Prefs.sp(this).getInt(Prefs.K_THEME, Prefs.THEME_AUTO)
         val group = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-        val names = listOf("Auto (system)", "White", "Dark")
+        val names = listOf("Match system pill", "White", "Dark")
         names.forEachIndexed { i, n ->
             group.addView(RadioButton(this).apply {
                 id = 1000 + i

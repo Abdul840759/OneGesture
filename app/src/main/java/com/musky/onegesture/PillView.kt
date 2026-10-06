@@ -33,6 +33,15 @@ class PillView(context: Context) : View(context) {
             }
         }
 
+    /** What the system says about the nav bar: true = light bar (dark pill), false = dark bar (white pill), null = unknown. */
+    var systemLightNav: Boolean? = null
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
     override fun onDraw(canvas: Canvas) {
         val d = resources.displayMetrics.density
         val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
@@ -40,7 +49,7 @@ class PillView(context: Context) : View(context) {
         val dark = when (cfg.theme) {
             Prefs.THEME_DARK -> true
             Prefs.THEME_LIGHT -> false
-            else -> night
+            else -> systemLightNav?.not() ?: night
         }
 
         val w = width.toFloat()
