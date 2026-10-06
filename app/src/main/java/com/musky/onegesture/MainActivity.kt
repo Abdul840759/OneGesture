@@ -17,6 +17,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 
 class MainActivity : Activity() {
 
@@ -28,6 +29,12 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // First launch: size the overlay to the phone's real gesture pill.
+        if (!Prefs.sp(this).getBoolean(Prefs.K_AUTOFIT, false)) {
+            DeviceInfo.autoFit(this)
+            Prefs.sp(this).edit().putBoolean(Prefs.K_AUTOFIT, true).apply()
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -53,7 +60,30 @@ class MainActivity : Activity() {
             }
         })
 
-        // Live preview of the overlay strip.
+        root.addView(Button(this).apply {
+            text = "Auto-fit to this phone's gesture bar"
+            setOnClickListener {
+                if (DeviceInfo.autoFit(this@MainActivity)) {
+                    GestureBarService.refreshNow()
+                    Toast.makeText(this@MainActivity, "Fitted to system pill", Toast.LENGTH_SHORT).show()
+                    recreate()
+                } else {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "System pill size not found on this ROM. Use the sliders.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        })
+
+        root.addView(TextView(this).apply {
+            text = DeviceInfo.describe(DeviceInfo.probe(this@MainActivity))
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(8), 0, 0)
+        })
+
         previewBox = FrameLayout(this).apply {
             setBackgroundColor(0xFF6B7280.toInt())
         }
@@ -77,11 +107,11 @@ class MainActivity : Activity() {
         val c = Prefs.Config()
 
         toggle(root, "Overlay on", Prefs.K_ENABLED, c.enabled)
-        toggle(root, "Cover the real gesture bar (solid backdrop)", Prefs.K_BACKDROP, c.backdrop)
+        toggle(root, "Solid backdrop behind pill (off = transparent)", Prefs.K_BACKDROP, c.backdrop)
         toggle(root, "Keep backdrop on lock screen", Prefs.K_BACKDROP_LOCK, c.backdropOnLock)
         toggle(root, "Alignment guide (red tint)", Prefs.K_GUIDE, c.guide)
 
-        label(root, "Style")
+        label(root, "Pill color")
         themeGroup(root)
 
         slider(root, "Pill width (dp)", 40, 220, Prefs.K_WIDTH, c.widthDp)
@@ -114,6 +144,7 @@ class MainActivity : Activity() {
         e.block()
         e.apply()
         updatePreview()
+        GestureBarService.refreshNow()
     }
 
     private fun updatePreview() {
@@ -122,8 +153,6 @@ class MainActivity : Activity() {
         val lp = preview.layoutParams
         lp.height = dp(cfg.stripDp)
         preview.layoutParams = lp
-        // Light preview background when the pill is dark and vice versa, so both are visible.
-        previewBox.setBackgroundColor(0xFF6B7280.toInt())
         preview.invalidate()
     }
 
@@ -149,7 +178,7 @@ class MainActivity : Activity() {
     private fun themeGroup(parent: LinearLayout) {
         val current = Prefs.sp(this).getInt(Prefs.K_THEME, Prefs.THEME_AUTO)
         val group = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-        val names = listOf("Auto (system)", "Dark", "Light")
+        val names = listOf("Auto (system)", "White", "Dark")
         names.forEachIndexed { i, n ->
             group.addView(RadioButton(this).apply {
                 id = 1000 + i

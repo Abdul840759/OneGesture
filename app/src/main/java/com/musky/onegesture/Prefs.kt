@@ -13,9 +13,10 @@ object Prefs {
     const val K_STRIP = "strip_dp"
     const val K_OPACITY = "opacity"
     const val K_THEME = "theme"
-    const val K_BACKDROP = "backdrop"
-    const val K_BACKDROP_LOCK = "backdrop_lock"
+    const val K_BACKDROP = "backdrop_v2"
+    const val K_BACKDROP_LOCK = "backdrop_lock_v2"
     const val K_GUIDE = "guide"
+    const val K_AUTOFIT = "autofit_done_v2"
 
     const val THEME_AUTO = 0
     const val THEME_DARK = 1
@@ -23,13 +24,13 @@ object Prefs {
 
     data class Config(
         val enabled: Boolean = true,
-        val widthDp: Int = 120,
-        val thicknessDp: Int = 4,
-        val bottomMarginDp: Int = 8,
+        val widthDp: Int = 112,
+        val thicknessDp: Int = 5,
+        val bottomMarginDp: Int = 5,
         val stripDp: Int = 24,
-        val opacity: Int = 90,
+        val opacity: Int = 100,
         val theme: Int = THEME_AUTO,
-        val backdrop: Boolean = true,
+        val backdrop: Boolean = false,
         val backdropOnLock: Boolean = false,
         val guide: Boolean = false
     )

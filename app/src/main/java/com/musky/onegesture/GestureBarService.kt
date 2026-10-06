@@ -19,6 +19,16 @@ import android.view.accessibility.AccessibilityEvent
 
 class GestureBarService : AccessibilityService() {
 
+    companion object {
+        @Volatile
+        private var instance: GestureBarService? = null
+
+        /** Called by the settings screen so slider changes apply instantly. */
+        fun refreshNow() {
+            instance?.refresh()
+        }
+    }
+
     private lateinit var wm: WindowManager
     private var view: PillView? = null
     private var params: WindowManager.LayoutParams? = null
@@ -30,13 +40,13 @@ class GestureBarService : AccessibilityService() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             refresh()
-            // Keyguard state settles a moment after these broadcasts.
             handler.postDelayed({ refresh() }, 400)
         }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         Prefs.sp(this).registerOnSharedPreferenceChangeListener(prefListener)
         val filter = IntentFilter().apply {
@@ -114,10 +124,10 @@ class GestureBarService : AccessibilityService() {
             } catch (_: Exception) {
             }
         }
+        v.invalidate()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Cheap re-sync (lock state, theme) whenever the foreground window changes.
         refresh()
     }
 
@@ -126,7 +136,6 @@ class GestureBarService : AccessibilityService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         refresh()
-        view?.invalidate()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -140,6 +149,7 @@ class GestureBarService : AccessibilityService() {
     }
 
     private fun cleanup() {
+        if (instance === this) instance = null
         handler.removeCallbacksAndMessages(null)
         try {
             Prefs.sp(this).unregisterOnSharedPreferenceChangeListener(prefListener)
