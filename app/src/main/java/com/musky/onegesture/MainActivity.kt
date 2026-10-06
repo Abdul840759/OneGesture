@@ -133,6 +133,7 @@ class MainActivity : Activity() {
         label(root, "Pill color")
         themeGroup(root)
 
+        slider(root, "Gray shade (used by Gray)", 90, 200, Prefs.K_GRAY, c.gray)
         slider(root, "Pill width (dp)", 40, 220, Prefs.K_WIDTH, c.widthDp)
         slider(root, "Pill thickness (dp)", 2, 10, Prefs.K_THICK, c.thicknessDp)
         slider(root, "Distance from bottom (dp)", 0, 40, Prefs.K_MARGIN, c.bottomMarginDp)
@@ -150,7 +151,8 @@ class MainActivity : Activity() {
             "Accessibility service: OFF. Enable \"One Gesture\" in accessibility settings."
         status.setTextColor(if (on) 0xFF15803D.toInt() else 0xFFB91C1C.toInt())
         val granted = checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED
-        dumpHint.text = if (granted) "" else
+        val autoMode = Prefs.sp(this).getInt(Prefs.K_THEME, Prefs.Config().theme) == Prefs.THEME_AUTO
+        dumpHint.text = if (granted || !autoMode) "" else
             "Exact pill colour matching needs a one-time permission. Run on your PC:\n" +
                 "adb shell pm grant com.musky.onegesture android.permission.DUMP"
         val dbg = getSharedPreferences(GestureBarService.DEBUG_FILE, MODE_PRIVATE)
@@ -202,9 +204,14 @@ class MainActivity : Activity() {
     }
 
     private fun themeGroup(parent: LinearLayout) {
-        val current = Prefs.sp(this).getInt(Prefs.K_THEME, Prefs.THEME_AUTO)
-        val group = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-        val names = listOf("Match system pill", "White", "Dark")
+        val current = Prefs.sp(this).getInt(Prefs.K_THEME, Prefs.Config().theme)
+        val group = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val names = listOf(
+            "Match system pill (needs the DUMP permission)",
+            "White",
+            "Dark",
+            "Gray (visible on light and dark)"
+        )
         names.forEachIndexed { i, n ->
             group.addView(RadioButton(this).apply {
                 id = 1000 + i

@@ -11,8 +11,8 @@ android {
         applicationId = "com.musky.onegesture"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     // Same key on every build (local or CI) so `adb install -r` always updates in place.

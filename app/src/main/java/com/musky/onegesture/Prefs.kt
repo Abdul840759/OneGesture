@@ -18,10 +18,12 @@ object Prefs {
     const val K_GUIDE = "guide"
     const val K_AUTOFIT = "autofit_done_v2"
     const val K_AUTOHIDE = "autohide"
+    const val K_GRAY = "gray"
 
     const val THEME_AUTO = 0
     const val THEME_DARK = 1
     const val THEME_LIGHT = 2
+    const val THEME_GRAY = 3
 
     data class Config(
         val enabled: Boolean = true,
@@ -30,11 +32,12 @@ object Prefs {
         val bottomMarginDp: Int = 5,
         val stripDp: Int = 24,
         val opacity: Int = 100,
-        val theme: Int = THEME_AUTO,
+        val theme: Int = THEME_GRAY,
         val backdrop: Boolean = false,
         val backdropOnLock: Boolean = false,
         val guide: Boolean = false,
-        val autoHide: Boolean = true
+        val autoHide: Boolean = true,
+        val gray: Int = 140
     )
 
     fun sp(c: Context): SharedPreferences =
@@ -54,7 +57,8 @@ object Prefs {
             backdrop = s.getBoolean(K_BACKDROP, d.backdrop),
             backdropOnLock = s.getBoolean(K_BACKDROP_LOCK, d.backdropOnLock),
             guide = s.getBoolean(K_GUIDE, d.guide),
-            autoHide = s.getBoolean(K_AUTOHIDE, d.autoHide)
+            autoHide = s.getBoolean(K_AUTOHIDE, d.autoHide),
+            gray = s.getInt(K_GRAY, d.gray)
         )
     }
 }

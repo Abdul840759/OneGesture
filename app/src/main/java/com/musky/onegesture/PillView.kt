@@ -49,6 +49,7 @@ class PillView(context: Context) : View(context) {
         val dark = when (cfg.theme) {
             Prefs.THEME_DARK -> true
             Prefs.THEME_LIGHT -> false
+            Prefs.THEME_GRAY -> night
             else -> systemLightNav?.not() ?: night
         }
 
@@ -74,7 +75,11 @@ class PillView(context: Context) : View(context) {
         val bottom = h - cfg.bottomMarginDp * d
         rect.set(left, bottom - ph, left + pw, bottom)
 
-        paint.color = if (dark) Color.WHITE else 0xFF1B1B1F.toInt()
+        paint.color = when {
+            cfg.theme == Prefs.THEME_GRAY -> Color.rgb(cfg.gray, cfg.gray, cfg.gray)
+            dark -> Color.WHITE
+            else -> 0xFF1B1B1F.toInt()
+        }
         paint.alpha = cfg.opacity * 255 / 100
         canvas.drawRoundRect(rect, ph / 2f, ph / 2f, paint)
     }
