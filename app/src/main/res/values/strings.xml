@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">One Gesture</string>
+    <string name="service_description">Draws a visual-only One UI style gesture bar on top of the system one. It does not read your screen or perform any actions.</string>
+</resources>
