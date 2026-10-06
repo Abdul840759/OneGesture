@@ -22,6 +22,7 @@ import android.widget.Toast
 class MainActivity : Activity() {
 
     private lateinit var status: TextView
+    private lateinit var fitInfo: TextView
     private lateinit var preview: PillView
     private lateinit var previewBox: FrameLayout
     private val d get() = resources.displayMetrics.density
@@ -84,6 +85,13 @@ class MainActivity : Activity() {
             setPadding(0, dp(8), 0, 0)
         })
 
+        fitInfo = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(4), 0, 0)
+        }
+        root.addView(fitInfo)
+
         previewBox = FrameLayout(this).apply {
             setBackgroundColor(0xFF6B7280.toInt())
         }
@@ -109,6 +117,7 @@ class MainActivity : Activity() {
         toggle(root, "Overlay on", Prefs.K_ENABLED, c.enabled)
         toggle(root, "Solid backdrop behind pill (off = transparent)", Prefs.K_BACKDROP, c.backdrop)
         toggle(root, "Keep backdrop on lock screen", Prefs.K_BACKDROP_LOCK, c.backdropOnLock)
+        toggle(root, "Auto-hide in fullscreen (videos, games)", Prefs.K_AUTOHIDE, c.autoHide)
         toggle(root, "Alignment guide (red tint)", Prefs.K_GUIDE, c.guide)
 
         label(root, "Pill color")
@@ -130,6 +139,8 @@ class MainActivity : Activity() {
         status.text = if (on) "Accessibility service: ON" else
             "Accessibility service: OFF. Enable \"One Gesture\" in accessibility settings."
         status.setTextColor(if (on) 0xFF15803D.toInt() else 0xFFB91C1C.toInt())
+        fitInfo.text = getSharedPreferences(GestureBarService.DEBUG_FILE, MODE_PRIVATE)
+            .getString(GestureBarService.DEBUG_KEY, "Overlay fit: not measured yet (service off?)")
     }
 
     private fun serviceEnabled(): Boolean {

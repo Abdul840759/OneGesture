@@ -7,21 +7,41 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import kotlin.math.abs
 
+@Suppress("DEPRECATION")
 class GestureBarService : AccessibilityService() {
 
     companion object {
         @Volatile
         private var instance: GestureBarService? = null
+
+        const val DEBUG_FILE = "gb_debug"
+        const val DEBUG_KEY = "fit"
+
+        // Video apps: hidden in landscape (fullscreen playback) as a fallback signal.
+        private val VIDEO_APPS = setOf(
+            "com.google.android.youtube",
+            "com.google.android.videos",
+            "com.netflix.mediaclient",
+            "org.videolan.vlc",
+            "com.mxtech.videoplayer.ad",
+            "com.mxtech.videoplayer.pro",
+            "com.amazon.avod.thirdpartyclient",
+            "tv.twitch.android.app"
+        )
 
         /** Called by the settings screen so slider changes apply instantly. */
         fun refreshNow() {
@@ -34,11 +54,19 @@ class GestureBarService : AccessibilityService() {
     private var params: WindowManager.LayoutParams? = null
     private val handler = Handler(Looper.getMainLooper())
 
+    private var navHidden = false          // foreground app hid the navigation bar (immersive)
+    private var fgPkg: String? = null      // last real foreground app
+    private val gameCache = HashMap<String, Boolean>()
+
+    private var fitAttempt = 0
+    private var fitToken = 0
+
     private val prefListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> refresh() }
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) navHidden = false
             refresh()
             handler.postDelayed({ refresh() }, 400)
         }
@@ -56,6 +84,12 @@ class GestureBarService : AccessibilityService() {
         }
         registerReceiver(screenReceiver, filter)
         attach()
+    }
+
+    private fun realMetrics(): DisplayMetrics {
+        val m = DisplayMetrics()
+        wm.defaultDisplay.getRealMetrics(m)
+        return m
     }
 
     private fun attach() {
@@ -81,14 +115,88 @@ class GestureBarService : AccessibilityService() {
         }
 
         val v = PillView(this)
+        // Lay out as if the navigation bar were hidden, so the window can reach the real screen bottom.
+        v.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        // Foreground apps (videos, games) hide the nav bar via system UI flags; we hear about it here.
+        v.setOnSystemUiVisibilityChangeListener { vis ->
+            navHidden = (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) != 0
+            updateHide()
+        }
+
         try {
             wm.addView(v, lp)
             view = v
             params = lp
             refresh()
+            fitToBottom()
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    /**
+     * Some ROMs stop overlay windows at the top of the navigation band. Measure where the
+     * window really landed and nudge it until its bottom edge meets the physical screen bottom.
+     */
+    private fun fitToBottom() {
+        val v = view ?: return
+        val lp = params ?: return
+        fitToken++
+        fitAttempt = 0
+        lp.gravity = Gravity.BOTTOM or Gravity.START
+        lp.y = 0
+        try {
+            wm.updateViewLayout(v, lp)
+        } catch (_: Exception) {
+        }
+        verifyFit(fitToken)
+    }
+
+    private fun verifyFit(token: Int) {
+        val v = view ?: return
+        v.postDelayed({
+            val lp = params
+            if (token != fitToken || view !== v || lp == null) return@postDelayed
+
+            val loc = IntArray(2)
+            v.getLocationOnScreen(loc)
+            val gap = realMetrics().heightPixels - (loc[1] + v.height)
+
+            if (abs(gap) <= 1 || fitAttempt >= 3) {
+                recordFit(gap)
+                return@postDelayed
+            }
+
+            fitAttempt++
+            val topMode = (lp.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP
+            when {
+                fitAttempt == 1 -> lp.y -= gap                      // bottom gravity: negative y moves down
+                fitAttempt == 2 -> {                                // fall back to absolute top positioning
+                    lp.gravity = Gravity.TOP or Gravity.START
+                    lp.y = realMetrics().heightPixels - lp.height
+                }
+                topMode -> lp.y += gap
+                else -> lp.y -= gap
+            }
+            try {
+                wm.updateViewLayout(v, lp)
+            } catch (_: Exception) {
+            }
+            verifyFit(token)
+        }, 150)
+    }
+
+    private fun recordFit(gap: Int) {
+        val m = realMetrics()
+        val mode = if ((params?.gravity ?: 0) and Gravity.VERTICAL_GRAVITY_MASK == Gravity.TOP) "top" else "bottom"
+        getSharedPreferences(DEBUG_FILE, Context.MODE_PRIVATE).edit()
+            .putString(
+                DEBUG_KEY,
+                "Overlay fit: gap ${gap}px after $fitAttempt step(s), $mode-anchored, " +
+                    "real screen ${m.widthPixels}x${m.heightPixels}"
+            ).apply()
     }
 
     private fun detach() {
@@ -107,6 +215,35 @@ class GestureBarService : AccessibilityService() {
         return km.isKeyguardLocked
     }
 
+    private fun isGame(pkg: String?): Boolean {
+        if (pkg == null) return false
+        return gameCache.getOrPut(pkg) {
+            try {
+                val info = packageManager.getApplicationInfo(pkg, 0)
+                info.category == ApplicationInfo.CATEGORY_GAME ||
+                    (info.flags and ApplicationInfo.FLAG_IS_GAME) != 0
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    private fun isImePackage(pkg: String): Boolean {
+        val ime = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+        return ime?.startsWith("$pkg/") == true
+    }
+
+    /** Fade out while a video/game is fullscreen, fade back in when the system bar returns. */
+    private fun updateHide() {
+        val v = view ?: return
+        val cfg = Prefs.load(this)
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val fallback = landscape && (isGame(fgPkg) || (fgPkg != null && fgPkg in VIDEO_APPS))
+        val hide = cfg.autoHide && !isLocked() && (navHidden || fallback)
+        v.animate().cancel()
+        v.animate().alpha(if (hide) 0f else 1f).setDuration(160).start()
+    }
+
     private fun refresh() {
         val v = view ?: return
         val lp = params ?: return
@@ -123,11 +260,19 @@ class GestureBarService : AccessibilityService() {
                 wm.updateViewLayout(v, lp)
             } catch (_: Exception) {
             }
+            fitToBottom()
         }
         v.invalidate()
+        updateHide()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            if (pkg != null && pkg != packageName && pkg != "com.android.systemui" && !isImePackage(pkg)) {
+                fgPkg = pkg
+            }
+        }
         refresh()
     }
 
@@ -136,6 +281,7 @@ class GestureBarService : AccessibilityService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         refresh()
+        fitToBottom()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -150,6 +296,7 @@ class GestureBarService : AccessibilityService() {
 
     private fun cleanup() {
         if (instance === this) instance = null
+        fitToken++
         handler.removeCallbacksAndMessages(null)
         try {
             Prefs.sp(this).unregisterOnSharedPreferenceChangeListener(prefListener)

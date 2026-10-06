@@ -1,7 +1,11 @@
+@file:Suppress("DEPRECATION")
+
 package com.musky.onegesture
 
 import android.content.Context
 import android.content.res.Resources
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -14,7 +18,8 @@ object DeviceInfo {
     data class Probe(
         val density: Float,
         val widthPx: Int,
-        val heightPx: Int,
+        val appHeightPx: Int,
+        val realHeightPx: Int,
         val navFrameDp: Float?,
         val gestureDp: Float?,
         val handleWidthDp: Float?,
@@ -37,6 +42,10 @@ object DeviceInfo {
     fun probe(ctx: Context): Probe {
         val dm = ctx.resources.displayMetrics
         val d = dm.density
+        val real = DisplayMetrics()
+        (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+            .defaultDisplay.getRealMetrics(real)
+
         val sys = Resources.getSystem()
         val nav = dimen(sys, "navigation_bar_frame_height", "android", d)
             ?: dimen(sys, "navigation_bar_height", "android", d)
@@ -52,7 +61,7 @@ object DeviceInfo {
             b = dimen(ui, "navigation_handle_bottom", "com.android.systemui", d)
         } catch (_: Exception) {
         }
-        return Probe(d, dm.widthPixels, dm.heightPixels, nav, gesture, w, r, b)
+        return Probe(d, dm.widthPixels, dm.heightPixels, real.heightPixels, nav, gesture, w, r, b)
     }
 
     /** Sizes the overlay pill to sit exactly over the system pill (slightly larger so it fully covers it). */
@@ -81,8 +90,8 @@ object DeviceInfo {
 
     fun describe(p: Probe): String = buildString {
         appendLine(
-            "Screen: ${p.widthPx}x${p.heightPx}px, density ${"%.2f".format(p.density)} " +
-                "(${(p.density * 160).roundToInt()}dpi)"
+            "Screen: ${p.widthPx}x${p.realHeightPx}px (app area ${p.appHeightPx}px high), " +
+                "density ${"%.2f".format(p.density)} (${(p.density * 160).roundToInt()}dpi)"
         )
         appendLine("Nav bar height: ${fmt(p.navFrameDp)}dp, gesture area: ${fmt(p.gestureDp)}dp")
         append(

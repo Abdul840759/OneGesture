@@ -17,6 +17,7 @@ object Prefs {
     const val K_BACKDROP_LOCK = "backdrop_lock_v2"
     const val K_GUIDE = "guide"
     const val K_AUTOFIT = "autofit_done_v2"
+    const val K_AUTOHIDE = "autohide"
 
     const val THEME_AUTO = 0
     const val THEME_DARK = 1
@@ -32,7 +33,8 @@ object Prefs {
         val theme: Int = THEME_AUTO,
         val backdrop: Boolean = false,
         val backdropOnLock: Boolean = false,
-        val guide: Boolean = false
+        val guide: Boolean = false,
+        val autoHide: Boolean = true
     )
 
     fun sp(c: Context): SharedPreferences =
@@ -51,7 +53,8 @@ object Prefs {
             theme = s.getInt(K_THEME, d.theme),
             backdrop = s.getBoolean(K_BACKDROP, d.backdrop),
             backdropOnLock = s.getBoolean(K_BACKDROP_LOCK, d.backdropOnLock),
-            guide = s.getBoolean(K_GUIDE, d.guide)
+            guide = s.getBoolean(K_GUIDE, d.guide),
+            autoHide = s.getBoolean(K_AUTOHIDE, d.autoHide)
         )
     }
 }
