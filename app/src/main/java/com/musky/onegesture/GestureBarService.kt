@@ -13,12 +13,16 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.abs
 
 @Suppress("DEPRECATION")
@@ -44,6 +48,12 @@ class GestureBarService : AccessibilityService() {
             "tv.twitch.android.app"
         )
 
+        private val FLAGS_REGEX = Regex("mLastSystemUiFlags=0x([0-9a-fA-F]+)")
+        private val DUMP_CMDS = listOf(
+            arrayOf("dumpsys", "window", "policy"),
+            arrayOf("dumpsys", "window")
+        )
+
         /** Called by the settings screen so slider changes apply instantly. */
         fun refreshNow() {
             instance?.refresh()
@@ -54,6 +64,7 @@ class GestureBarService : AccessibilityService() {
     private var view: PillView? = null
     private var params: WindowManager.LayoutParams? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val bg: ExecutorService = Executors.newSingleThreadExecutor()
 
     private var navHidden = false          // foreground app hid the navigation bar (immersive)
     private var fgPkg: String? = null      // last real foreground app
@@ -61,6 +72,11 @@ class GestureBarService : AccessibilityService() {
 
     private var fitAttempt = 0
     private var fitToken = 0
+
+    private var colorCheckPending = false
+    private var lastColorCheck = 0L
+    @Volatile
+    private var dumpIdx = 0
 
     private val prefListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> refresh() }
@@ -70,6 +86,7 @@ class GestureBarService : AccessibilityService() {
             if (intent.action == Intent.ACTION_SCREEN_OFF) navHidden = false
             refresh()
             handler.postDelayed({ refresh() }, 400)
+            scheduleColorCheck(500, 0)
         }
     }
 
@@ -77,6 +94,13 @@ class GestureBarService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        // First run: size the overlay to this phone's real gesture pill (no need to open the app).
+        if (!Prefs.sp(this).getBoolean(Prefs.K_AUTOFIT, false)) {
+            DeviceInfo.autoFit(this)
+            Prefs.sp(this).edit().putBoolean(Prefs.K_AUTOFIT, true).apply()
+        }
+
         Prefs.sp(this).registerOnSharedPreferenceChangeListener(prefListener)
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -85,6 +109,7 @@ class GestureBarService : AccessibilityService() {
         }
         registerReceiver(screenReceiver, filter)
         attach()
+        scheduleColorCheck(300, 0)
     }
 
     private fun realMetrics(): DisplayMetrics {
@@ -120,18 +145,12 @@ class GestureBarService : AccessibilityService() {
         v.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-        // Foreground apps (videos, games) hide the nav bar via system UI flags; we hear about it here.
+        // Android only passes low-profile / hide-navigation / fullscreen to overlays, which is
+        // enough to know when a video or game hides the bar. (Pill colour is read separately.)
         v.setOnSystemUiVisibilityChangeListener { vis ->
             navHidden = (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) != 0
-            val light = (vis and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) != 0
-            v.systemLightNav = light
-            getSharedPreferences(DEBUG_FILE, Context.MODE_PRIVATE).edit()
-                .putString(
-                    VIS_KEY,
-                    "System nav bar reported: " + (if (light) "light (dark pill)" else "dark (white pill)") +
-                        ", hidden=$navHidden"
-                ).apply()
             updateHide()
+            scheduleColorCheck(300, 0)
         }
 
         try {
@@ -199,7 +218,7 @@ class GestureBarService : AccessibilityService() {
 
     private fun recordFit(gap: Int) {
         val m = realMetrics()
-        val mode = if ((params?.gravity ?: 0) and Gravity.VERTICAL_GRAVITY_MASK == Gravity.TOP) "top" else "bottom"
+        val mode = if (((params?.gravity ?: 0) and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP) "top" else "bottom"
         getSharedPreferences(DEBUG_FILE, Context.MODE_PRIVATE).edit()
             .putString(
                 DEBUG_KEY,
@@ -207,6 +226,74 @@ class GestureBarService : AccessibilityService() {
                     "real screen ${m.widthPixels}x${m.heightPixels}"
             ).apply()
     }
+
+    // ---- Pill colour: read the system's own light/dark nav bar flag --------------------------
+
+    private fun scheduleColorCheck(delayMs: Long, minGapMs: Long) {
+        if (colorCheckPending) return
+        colorCheckPending = true
+        val wait = maxOf(delayMs, lastColorCheck + minGapMs - SystemClock.uptimeMillis())
+        handler.postDelayed({
+            colorCheckPending = false
+            runColorCheck()
+        }, wait)
+    }
+
+    private fun runColorCheck() {
+        if (view == null) return
+        if (Prefs.load(this).theme != Prefs.THEME_AUTO) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isInteractive) return
+        lastColorCheck = SystemClock.uptimeMillis()
+        try {
+            bg.execute {
+                val r = readNavLight()
+                handler.post { applyNavLight(r) }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Reads mLastSystemUiFlags from the window policy; bit 0x10 = light navigation bar. */
+    private fun readNavLight(): Pair<Boolean?, String> {
+        var last = "no output"
+        for (i in DUMP_CMDS.indices) {
+            val idx = (dumpIdx + i) % DUMP_CMDS.size
+            try {
+                val p = ProcessBuilder(*DUMP_CMDS[idx]).redirectErrorStream(true).start()
+                val text = p.inputStream.bufferedReader().use { it.readText() }
+                p.waitFor()
+                p.destroy()
+                val m = FLAGS_REGEX.find(text)
+                if (m != null) {
+                    dumpIdx = idx
+                    val flags = m.groupValues[1].toLong(16)
+                    return Pair((flags and 0x10L) != 0L, "flags=0x${m.groupValues[1]}")
+                }
+                last = text.trim().replace("\n", " ").take(110)
+                if (text.contains("Permission Denial", ignoreCase = true)) break
+            } catch (e: Exception) {
+                last = "exec failed: ${e.javaClass.simpleName}"
+                break
+            }
+        }
+        return Pair(null, "dumpsys: $last")
+    }
+
+    private fun applyNavLight(r: Pair<Boolean?, String>) {
+        val v = view ?: return
+        v.systemLightNav = r.first
+        val label = when (r.first) {
+            true -> "light bar, dark pill"
+            false -> "dark bar, white pill"
+            null -> "unknown, following phone theme"
+        }
+        getSharedPreferences(DEBUG_FILE, Context.MODE_PRIVATE).edit()
+            .putString(VIS_KEY, "System nav bar: $label [${r.second}]")
+            .apply()
+    }
+
+    // ---- housekeeping ------------------------------------------------------------------------
 
     private fun detach() {
         view?.let {
@@ -273,16 +360,24 @@ class GestureBarService : AccessibilityService() {
         }
         v.invalidate()
         updateHide()
+        if (cfg.theme == Prefs.THEME_AUTO) scheduleColorCheck(200, 1500)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event != null && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (event == null) return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
             if (pkg != null && pkg != packageName && pkg != "com.android.systemui" && !isImePackage(pkg)) {
                 fgPkg = pkg
             }
+            refresh()
+            // App switch / keyboard / dialog: re-read the nav bar colour now and once more after animations.
+            scheduleColorCheck(300, 0)
+            handler.postDelayed({ scheduleColorCheck(0, 0) }, 1000)
+        } else {
+            // Content changes (e.g. keyboard hiding, dark/light switch): throttled.
+            scheduleColorCheck(400, 1500)
         }
-        refresh()
     }
 
     override fun onInterrupt() {}
@@ -307,6 +402,7 @@ class GestureBarService : AccessibilityService() {
         if (instance === this) instance = null
         fitToken++
         handler.removeCallbacksAndMessages(null)
+        bg.shutdownNow()
         try {
             Prefs.sp(this).unregisterOnSharedPreferenceChangeListener(prefListener)
         } catch (_: Exception) {

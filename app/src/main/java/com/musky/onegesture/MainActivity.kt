@@ -3,6 +3,7 @@ package com.musky.onegesture
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -23,6 +24,7 @@ class MainActivity : Activity() {
 
     private lateinit var status: TextView
     private lateinit var fitInfo: TextView
+    private lateinit var dumpHint: TextView
     private lateinit var preview: PillView
     private lateinit var previewBox: FrameLayout
     private val d get() = resources.displayMetrics.density
@@ -92,6 +94,14 @@ class MainActivity : Activity() {
         }
         root.addView(fitInfo)
 
+        dumpHint = TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFFB91C1C.toInt())
+            setTextIsSelectable(true)
+            setPadding(0, dp(6), 0, 0)
+        }
+        root.addView(dumpHint)
+
         previewBox = FrameLayout(this).apply {
             setBackgroundColor(0xFF6B7280.toInt())
         }
@@ -139,6 +149,10 @@ class MainActivity : Activity() {
         status.text = if (on) "Accessibility service: ON" else
             "Accessibility service: OFF. Enable \"One Gesture\" in accessibility settings."
         status.setTextColor(if (on) 0xFF15803D.toInt() else 0xFFB91C1C.toInt())
+        val granted = checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED
+        dumpHint.text = if (granted) "" else
+            "Exact pill colour matching needs a one-time permission. Run on your PC:\n" +
+                "adb shell pm grant com.musky.onegesture android.permission.DUMP"
         val dbg = getSharedPreferences(GestureBarService.DEBUG_FILE, MODE_PRIVATE)
         fitInfo.text = dbg.getString(GestureBarService.DEBUG_KEY, "Overlay fit: not measured yet (service off?)") +
             "\n" + dbg.getString(GestureBarService.VIS_KEY, "System nav bar: no change reported yet")
